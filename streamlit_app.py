@@ -8,7 +8,7 @@ from PIL import Image
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE SUPABASE ---
-# Configura estos valores en el panel de Streamlit Cloud (Settings > Secrets)
+# Asegúrate de tener SUPABASE_URL y SUPABASE_KEY en los Secrets de Streamlit Cloud
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -20,7 +20,7 @@ st.set_page_config(
     page_icon="🛡️"
 )
 
-# --- ESTILOS ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
 body { background-color: #F4F6F9; }
@@ -29,29 +29,51 @@ body { background-color: #F4F6F9; }
     background: linear-gradient(90deg, #0E4667, #1C7ED6);
     padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 25px;
 }
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #0E4667, #1C7ED6); }
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0E4667, #1C7ED6);
+}
 [data-testid="stSidebar"] * { color: white !important; }
 .stButton>button {
     width: 100%; border-radius: 8px;
-    background: linear-gradient(90deg, #1C7ED6, #0E4667); color: white;
+    background: linear-gradient(90deg, #1C7ED6, #0E4667);
+    color: white; font-weight: 600;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
+# --- FUNCIONES DE BASE DE DATOS ---
 
-def get_data():
-    response = supabase.table("gestiones").select("*").order("id").execute()
-    return pd.DataFrame(response.data)
+def get_all_data():
+    """Obtiene todos los registros de la tabla gestiones en Supabase."""
+    try:
+        response = supabase.table("gestiones").select("*").order("id", desc=True).execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        st.error(f"Error al obtener datos: {e}")
+        return pd.DataFrame()
 
 def save_record(equipo, usuario, fecha_reporte, file):
+    """Guarda un nuevo registro y sube la imagen al Storage de Supabase."""
     path_publico = ""
     if file:
-        file_name = f"{equipo}_{datetime.now().strftime('%H%M%S')}.png"
-        # Subir a bucket 'evidencias'
-        supabase.storage.from_("evidencias").upload(file_name, file.getbuffer())
-        path_publico = supabase.storage.from_("evidencias").get_public_url(file_name)
-    
+        # Generar nombre único para la imagen
+        file_extension = file.name.split('.')[-1]
+        file_name = f"{equipo}_{datetime.now().strftime('%H%M%S')}.{file_extension}"
+        
+        try:
+            # Subir bytes directamente al bucket 'evidencias'
+            file_bytes = file.getvalue()
+            supabase.storage.from_("evidencias").upload(
+                path=file_name,
+                file=file_bytes,
+                file_options={"content-type": file.type}
+            )
+            # Obtener la URL pública de la imagen
+            path_publico = supabase.storage.from_("evidencias").get_public_url(file_name)
+        except Exception as e:
+            st.error(f"Error al subir evidencia: {e}")
+
+    # Insertar datos en la tabla
     data = {
         "equipo": equipo,
         "usuario": usuario,
@@ -60,24 +82,36 @@ def save_record(equipo, usuario, fecha_reporte, file):
         "fecha_atencion": "",
         "comentarios": ""
     }
-    supabase.table("gestiones").insert(data).execute()
+    try:
+        supabase.table("gestiones").insert(data).execute()
+        st.success("Registro guardado exitosamente ✅")
+    except Exception as e:
+        st.error(f"Error al insertar registro: {e}")
 
-def update_full_db(id_reg, f_atencion, comentario):
-    supabase.table("gestiones").update({
-        "fecha_atencion": f_atencion,
-        "comentarios": comentario
-    }).eq("id", id_reg).execute()
+def update_record(id_reg, f_atencion, comentario):
+    """Actualiza la atención y comentarios de un registro."""
+    try:
+        supabase.table("gestiones").update({
+            "fecha_atencion": f_atencion,
+            "comentarios": comentario
+        }).eq("id", id_reg).execute()
+        st.toast("Cambios guardados")
+    except Exception as e:
+        st.error(f"Error al actualizar: {e}")
 
 def delete_record(id_reg):
-    supabase.table("gestiones").delete().eq("id", id_reg).execute()
+    """Elimina un registro de la tabla."""
+    try:
+        supabase.table("gestiones").delete().eq("id", id_reg).execute()
+        st.toast("Registro eliminado")
+    except Exception as e:
+        st.error(f"Error al eliminar: {e}")
 
-# --- EXPORTACIÓN ---
+# --- EXPORTACIÓN A EXCEL ---
 def exportar_excel_pro(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
-        # (Nota: La inserción de imágenes de URL a Excel requiere descarga previa, 
-        # para este entorno web, exportamos el reporte con los links directos)
         worksheet = writer.sheets['Reporte']
         worksheet.set_column('A:G', 20)
     return output.getvalue()
@@ -91,32 +125,37 @@ with st.sidebar:
         ["GESTIÓN DE VULNERABILIDADES TÉCNICAS", "GESTIÓN DE ...", "GESTION DE..."]
     )
 
+# --- TÍTULO PRINCIPAL ---
 st.markdown('<div class="main-title">🛡️ CONTROLES DE SEGURIDAD DIGITAL</div>', unsafe_allow_html=True)
 
+# --- LÓGICA DE CONTENIDO ---
 if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
     col_izq, col_der = st.columns([1, 2.2])
 
-    # -------- IZQUIERDA (Registro y Dashboard) --------
+    # --- COLUMNA IZQUIERDA: REGISTRO Y DASHBOARD ---
     with col_izq:
         st.markdown("### 📝 Registro")
-        with st.form("nuevo", clear_on_submit=True):
+        with st.form("nuevo_registro", clear_on_submit=True):
             eq = st.text_input("Equipo")
             us = st.text_input("Usuario")
             f_r = st.date_input("Fecha Reporte", datetime.now())
-            evid = st.file_uploader("Evidencia", type=['png', 'jpg'])
+            evid = st.file_uploader("Evidencia (Captura)", type=['png', 'jpg', 'jpeg'])
             
             if st.form_submit_button("💾 Guardar"):
                 if eq and us:
                     save_record(eq, us, f_r.strftime("%Y-%m-%d"), evid)
-                    st.success("Guardado en la nube ✅")
                     st.rerun()
+                else:
+                    st.warning("Por favor complete los campos de Equipo y Usuario.")
 
         st.markdown("### 📊 Dashboard")
-        df_dash = get_data()
+        df_dash = get_all_data()
+        
         if not df_dash.empty:
             total = len(df_dash)
-            atendidos = df_dash[df_dash["fecha_atencion"] != ""].shape[0]
-            pendientes = df_dash[df_dash["fecha_atencion"] == ""].shape[0]
+            # Manejo de nulos o vacíos para las métricas
+            atendidos = df_dash[df_dash["fecha_atencion"].fillna("") != ""].shape[0]
+            pendientes = total - atendidos
 
             d1, d2, d3 = st.columns(3)
             d1.metric("Total", total)
@@ -128,30 +167,33 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                 "Cantidad": [atendidos, pendientes]
             }).set_index("Estado"))
         else:
-            st.info("Sin datos")
+            st.info("Sin datos para mostrar en el Dashboard.")
 
-    # -------- DERECHA (Seguimiento) --------
+    # --- COLUMNA DERECHA: SEGUIMIENTO ---
     with col_der:
         st.markdown("### 📋 Seguimiento")
-        df_db = get_data()
+        df_db = get_all_data()
 
         if not df_db.empty:
             for _, row in df_db.iterrows():
-                estado = "🟢 Atendido" if row['fecha_atencion'] else "🔴 Pendiente"
+                f_at_val = row['fecha_atencion'] if row['fecha_atencion'] else ""
+                estado = "🟢 Atendido" if f_at_val else "🔴 Pendiente"
+                
                 with st.expander(f"{row['equipo']} | {row['usuario']} | {estado}"):
                     c1, c2, c3, c4 = st.columns([1.5, 2, 1, 1.2])
                     
                     with c1:
                         if row['captura_path']:
                             st.image(row['captura_path'], use_container_width=True)
-                        st.caption("Evidencia en la nube")
+                        else:
+                            st.write("Sin imagen")
 
                     with c2:
                         st.text_input("Fecha Reporte", value=row['fecha_reporte'], disabled=True, key=f"fr_{row['id']}")
-                        f_at = st.text_input("Fecha Atención", value=row['fecha_atencion'], key=f"f_{row['id']}")
-                        com = st.text_area("Comentarios", value=row['comentarios'], key=f"c_{row['id']}")
-                        if st.button("Guardar", key=f"b_{row['id']}"):
-                            update_full_db(row['id'], f_at, com)
+                        f_at = st.text_input("Fecha Atención", value=f_at_val, key=f"f_{row['id']}", placeholder="YYYY-MM-DD")
+                        com = st.text_area("Comentarios", value=row['comentarios'] if row['comentarios'] else "", key=f"c_{row['id']}")
+                        if st.button("Actualizar", key=f"btn_{row['id']}"):
+                            update_record(row['id'], f_at, com)
                             st.rerun()
 
                     with c3:
@@ -161,15 +203,29 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 
                     with c4:
                         asunto = f"Actualizar sistema operativo - {row['equipo']}"
-                        cuerpo = f"Estimados Señores,\n\nPor apoyo en la actualización del sistema operativo del equipo {row['equipo']} de Windows 10 a Windows 11..."
+                        cuerpo = f"""Estimados Señores,
+                        
+Por medio del presente, solicito su apoyo para la actualización del sistema operativo del equipo {row['equipo']}, de Windows 10 a Windows 11, debido a la finalización del soporte de seguridad.
+
+Saludos cordiales."""
                         mail_url = f"mailto:yaliaga@mincetur.gob.pe?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
-                        st.markdown(f'<a href="{mail_url}" target="_blank"><button style="width:100%; padding:8px; border-radius:8px; border:none; background:linear-gradient(90deg, #28a745, #218838); color:white; font-weight:600; cursor:pointer;">📧 Enviar Correo</button></a>', unsafe_allow_html=True)
+                        
+                        st.markdown(f"""
+                            <a href="{mail_url}" target="_blank">
+                                <button style="width:100%; padding:8px; border-radius:8px; border:none; background:linear-gradient(90deg, #28a745, #218838); color:white; font-weight:600; cursor:pointer;">
+                                    📧 Enviar Correo
+                                </button>
+                            </a>
+                        """, unsafe_allow_html=True)
 
             st.divider()
-            excel = exportar_excel_pro(df_db)
-            st.download_button("📥 Descargar Reporte Excel", excel, "reporte_seguridad.xlsx")
+            excel_data = exportar_excel_pro(df_db)
+            st.download_button("📥 Descargar Reporte Excel", excel_data, "reporte_seguridad.xlsx")
         else:
-            st.info("No hay datos")
+            st.info("No hay registros en la base de datos.")
 
-elif opcion in ["GESTIÓN DE ...", "GESTION DE..."]:
-    st.subheader("En proceso")
+elif opcion == "GESTIÓN DE ...":
+    st.subheader("Módulo en desarrollo...")
+
+elif opcion == "GESTION DE...":
+    st.subheader("Módulo en desarrollo...")
