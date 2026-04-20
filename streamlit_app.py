@@ -31,45 +31,44 @@ body { background-color: #F4F6F9; }
 }
 [data-testid="stSidebar"] { background: linear-gradient(180deg, #0E4667, #1C7ED6); }
 [data-testid="stSidebar"] * { color: white !important; }
-.stButton>button { width: 100%; border-radius: 8px; background: linear-gradient(90deg, #1C7ED6, #0E4667); color: white; }
+.stButton>button {
+    width: 100%; border-radius: 8px;
+    background: linear-gradient(90deg, #1C7ED6, #0E4667); color: white;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # --- FUNCIONES DE BASE DE DATOS (SUPABASE) ---
-def get_all_data():
-    response = supabase.table("gestiones").select("*").order("id", desc=True).execute()
+
+def get_data():
+    response = supabase.table("gestiones").select("*").order("id").execute()
     return pd.DataFrame(response.data)
 
-def save_to_supabase(eq, us, f_r, img_file):
-    captura_url = ""
+def save_record(equipo, usuario, fecha_reporte, file):
+    path_publico = ""
+    if file:
+        file_name = f"{equipo}_{datetime.now().strftime('%H%M%S')}.png"
+        # Subir a bucket 'evidencias'
+        supabase.storage.from_("evidencias").upload(file_name, file.getbuffer())
+        path_publico = supabase.storage.from_("evidencias").get_public_url(file_name)
     
-    # Subir imagen a Supabase Storage (Bucket 'evidencias')
-    if img_file:
-        file_name = f"{eq}_{datetime.now().strftime('%H%M%S')}.png"
-        bucket = "evidencias"
-        # Subir archivo
-        supabase.storage.from_(bucket).upload(file_name, img_file.getvalue())
-        # Obtener URL pública
-        captura_url = supabase.storage.from_(bucket).get_public_url(file_name)
-
-    # Insertar en tabla
     data = {
-        "equipo": eq,
-        "usuario": us,
-        "fecha_reporte": f_r.strftime("%Y-%m-%d"),
-        "captura_path": captura_url,
+        "equipo": equipo,
+        "usuario": usuario,
+        "fecha_reporte": fecha_reporte,
+        "captura_path": path_publico,
         "fecha_atencion": "",
         "comentarios": ""
     }
     supabase.table("gestiones").insert(data).execute()
 
-def update_supabase(id_reg, f_atencion, comentario):
+def update_full_db(id_reg, f_atencion, comentario):
     supabase.table("gestiones").update({
         "fecha_atencion": f_atencion,
         "comentarios": comentario
     }).eq("id", id_reg).execute()
 
-def delete_from_supabase(id_reg):
+def delete_record(id_reg):
     supabase.table("gestiones").delete().eq("id", id_reg).execute()
 
 # --- EXPORTACIÓN ---
@@ -77,20 +76,27 @@ def exportar_excel_pro(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
+        # (Nota: La inserción de imágenes de URL a Excel requiere descarga previa, 
+        # para este entorno web, exportamos el reporte con los links directos)
+        worksheet = writer.sheets['Reporte']
+        worksheet.set_column('A:G', 20)
     return output.getvalue()
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.markdown("## 🛡️ Panel de Control")
     st.markdown("---")
-    opcion = st.radio("Seleccione Operación:", ["GESTIÓN DE VULNERABILIDADES TÉCNICAS", "GESTIÓN DE ...", "GESTION DE..."])
+    opcion = st.radio(
+        "Seleccione Operación:",
+        ["GESTIÓN DE VULNERABILIDADES TÉCNICAS", "GESTIÓN DE ...", "GESTION DE..."]
+    )
 
 st.markdown('<div class="main-title">🛡️ CONTROLES DE SEGURIDAD DIGITAL</div>', unsafe_allow_html=True)
 
 if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
     col_izq, col_der = st.columns([1, 2.2])
 
-    # -------- IZQUIERDA: REGISTRO --------
+    # -------- IZQUIERDA (Registro y Dashboard) --------
     with col_izq:
         st.markdown("### 📝 Registro")
         with st.form("nuevo", clear_on_submit=True):
@@ -98,26 +104,36 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
             us = st.text_input("Usuario")
             f_r = st.date_input("Fecha Reporte", datetime.now())
             evid = st.file_uploader("Evidencia", type=['png', 'jpg'])
-
+            
             if st.form_submit_button("💾 Guardar"):
                 if eq and us:
-                    save_to_supabase(eq, us, f_r, evid)
-                    st.success("Guardado en la Nube ✅")
+                    save_record(eq, us, f_r.strftime("%Y-%m-%d"), evid)
+                    st.success("Guardado en la nube ✅")
                     st.rerun()
 
-        # Dashboard
         st.markdown("### 📊 Dashboard")
-        df_dash = get_all_data()
+        df_dash = get_data()
         if not df_dash.empty:
-            t, a, p = len(df_dash), df_dash[df_dash["fecha_atencion"] != ""].shape[0], df_dash[df_dash["fecha_atencion"] == ""].shape[0]
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Total", t); d2.metric("Atendidos", a); d3.metric("Pendientes", p)
-            st.bar_chart(pd.DataFrame({"Estado": ["Atendidos", "Pendientes"], "Cantidad": [a, p]}).set_index("Estado"))
+            total = len(df_dash)
+            atendidos = df_dash[df_dash["fecha_atencion"] != ""].shape[0]
+            pendientes = df_dash[df_dash["fecha_atencion"] == ""].shape[0]
 
-    # -------- DERECHA: SEGUIMIENTO --------
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Total", total)
+            d2.metric("Atendidos", atendidos)
+            d3.metric("Pendientes", pendientes)
+
+            st.bar_chart(pd.DataFrame({
+                "Estado": ["Atendidos", "Pendientes"],
+                "Cantidad": [atendidos, pendientes]
+            }).set_index("Estado"))
+        else:
+            st.info("Sin datos")
+
+    # -------- DERECHA (Seguimiento) --------
     with col_der:
         st.markdown("### 📋 Seguimiento")
-        df_db = get_all_data()
+        df_db = get_data()
 
         if not df_db.empty:
             for _, row in df_db.iterrows():
@@ -128,29 +144,32 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                     with c1:
                         if row['captura_path']:
                             st.image(row['captura_path'], use_container_width=True)
+                        st.caption("Evidencia en la nube")
 
                     with c2:
+                        st.text_input("Fecha Reporte", value=row['fecha_reporte'], disabled=True, key=f"fr_{row['id']}")
                         f_at = st.text_input("Fecha Atención", value=row['fecha_atencion'], key=f"f_{row['id']}")
                         com = st.text_area("Comentarios", value=row['comentarios'], key=f"c_{row['id']}")
-                        if st.button("Actualizar", key=f"b_{row['id']}"):
-                            update_supabase(row['id'], f_at, com)
-                            st.success("Actualizado")
+                        if st.button("Guardar", key=f"b_{row['id']}"):
+                            update_full_db(row['id'], f_at, com)
                             st.rerun()
 
                     with c3:
                         if st.button("Eliminar", key=f"del_{row['id']}"):
-                            delete_from_supabase(row['id'])
+                            delete_record(row['id'])
                             st.rerun()
 
                     with c4:
-                        # (Mantenemos tu lógica de correo)
                         asunto = f"Actualizar sistema operativo - {row['equipo']}"
-                        cuerpo = f"Estimados...\nSolicito apoyo para {row['equipo']}..."
+                        cuerpo = f"Estimados Señores,\n\nPor apoyo en la actualización del sistema operativo del equipo {row['equipo']} de Windows 10 a Windows 11..."
                         mail_url = f"mailto:yaliaga@mincetur.gob.pe?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
-                        st.markdown(f'<a href="{mail_url}" target="_blank"><button style="width: 100%; padding: 8px; border-radius: 8px; border: none; background: #28a745; color: white; font-weight: 600; cursor: pointer;">📧 Correo</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{mail_url}" target="_blank"><button style="width:100%; padding:8px; border-radius:8px; border:none; background:linear-gradient(90deg, #28a745, #218838); color:white; font-weight:600; cursor:pointer;">📧 Enviar Correo</button></a>', unsafe_allow_html=True)
 
             st.divider()
             excel = exportar_excel_pro(df_db)
-            st.download_button("📥 Descargar Excel", excel, "reporte.xlsx")
+            st.download_button("📥 Descargar Reporte Excel", excel, "reporte_seguridad.xlsx")
         else:
             st.info("No hay datos")
+
+elif opcion in ["GESTIÓN DE ...", "GESTION DE..."]:
+    st.subheader("En proceso")
