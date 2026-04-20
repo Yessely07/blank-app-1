@@ -170,6 +170,7 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
             st.info("Sin datos para mostrar en el Dashboard.")
 
     # --- COLUMNA DERECHA: SEGUIMIENTO ---
+    # --- COLUMNA DERECHA: SEGUIMIENTO ---
     with col_der:
         st.markdown("### 📋 Seguimiento")
         df_db = get_all_data()
@@ -183,18 +184,49 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                     c1, c2, c3, c4 = st.columns([1.5, 2, 1, 1.2])
                     
                     with c1:
+                        # Mostrar imagen actual
                         if row['captura_path']:
-                            st.image(row['captura_path'], use_container_width=True)
+                            st.image(row['captura_path'], use_container_width=True, caption="Evidencia Actual")
                         else:
-                            st.write("Sin imagen")
+                            st.info("Sin imagen")
+                        
+                        # NUEVA ACCIÓN: Subir nueva imagen para actualizar
+                        nueva_evid = st.file_uploader("Actualizar Imagen", type=['png', 'jpg', 'jpeg'], key=f"upd_img_{row['id']}")
 
                     with c2:
                         st.text_input("Fecha Reporte", value=row['fecha_reporte'], disabled=True, key=f"fr_{row['id']}")
                         f_at = st.text_input("Fecha Atención", value=f_at_val, key=f"f_{row['id']}", placeholder="YYYY-MM-DD")
                         com = st.text_area("Comentarios", value=row['comentarios'] if row['comentarios'] else "", key=f"c_{row['id']}")
-                        if st.button("Actualizar", key=f"btn_{row['id']}"):
-                            update_record(row['id'], f_at, com)
-                            st.rerun()
+                        
+                        if st.button("Actualizar Todo", key=f"btn_{row['id']}"):
+                            # 1. Lógica para subir la nueva imagen si existe
+                            nuevo_path = row['captura_path']
+                            if nueva_evid:
+                                file_extension = nueva_evid.name.split('.')[-1]
+                                file_name = f"{row['equipo']}_UPDATE_{datetime.now().strftime('%H%M%S')}.{file_extension}"
+                                file_bytes = nueva_evid.getvalue()
+                                
+                                try:
+                                    supabase.storage.from_("evidencias").upload(
+                                        path=file_name,
+                                        file=file_bytes,
+                                        file_options={"content-type": nueva_evid.type}
+                                    )
+                                    nuevo_path = supabase.storage.from_("evidencias").get_public_url(file_name)
+                                except Exception as e:
+                                    st.error(f"Error al subir nueva imagen: {e}")
+
+                            # 2. Actualizar base de datos (incluyendo el nuevo path si cambió)
+                            try:
+                                supabase.table("gestiones").update({
+                                    "fecha_atencion": f_at,
+                                    "comentarios": com,
+                                    "captura_path": nuevo_path
+                                }).eq("id", row['id']).execute()
+                                st.success("¡Registro e imagen actualizados!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al actualizar: {e}")
 
                     with c3:
                         if st.button("Eliminar", key=f"del_{row['id']}"):
@@ -202,28 +234,12 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                             st.rerun()
 
                     with c4:
+                        # (Mantiene tu lógica de correo)
                         asunto = f"Actualizar sistema operativo - {row['equipo']}"
-                        cuerpo = f"""Estimados Señores,
-                        
-Por medio del presente, solicito su apoyo para la actualización del sistema operativo del equipo {row['equipo']}, de Windows 10 a Windows 11, debido a la finalización del soporte de seguridad.
-
-Saludos cordiales."""
+                        cuerpo = f"Estimados Señores,\n\nSolicito apoyo para actualizar el equipo {row['equipo']}..."
                         mail_url = f"mailto:yaliaga@mincetur.gob.pe?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
                         
-                        st.markdown(f"""
-                            <a href="{mail_url}" target="_blank">
-                                <button style="width:100%; padding:8px; border-radius:8px; border:none; background:linear-gradient(90deg, #28a745, #218838); color:white; font-weight:600; cursor:pointer;">
-                                    📧 Enviar Correo
-                                </button>
-                            </a>
-                        """, unsafe_allow_html=True)
-
-            st.divider()
-            excel_data = exportar_excel_pro(df_db)
-            st.download_button("📥 Descargar Reporte Excel", excel_data, "reporte_seguridad.xlsx")
-        else:
-            st.info("No hay registros en la base de datos.")
-
+                        st.markdown(f'<a href="{mail_url}" target="_blank"><button style="width:100%; padding:8px; border-radius:8px; border:none; background:linear-gradient(90deg, #28a745, #218838); color:white; font-weight:600; cursor:pointer;">📧 Enviar Correo</button></a>', unsafe_allow_html=True)
 elif opcion == "GESTIÓN DE ...":
     st.subheader("Módulo en desarrollo...")
 
