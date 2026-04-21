@@ -14,8 +14,6 @@ from PIL import Image
 
 from supabase import create_client, Client
 
-
-
 # --- CONFIGURACIÓN DE SUPABASE ---
 
 # Asegúrate de tener SUPABASE_URL y SUPABASE_KEY en los Secrets de Streamlit Cloud
@@ -25,8 +23,6 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 
@@ -82,12 +78,7 @@ body { background-color: #F4F6F9; }
 
 """, unsafe_allow_html=True)
 
-
-
 # --- FUNCIONES DE BASE DE DATOS ---
-
-
-
 def get_all_data():
 
     """Obtiene todos los registros de la tabla gestiones en Supabase."""
@@ -120,8 +111,6 @@ def save_record(equipo, usuario, fecha_reporte, file):
 
         file_name = f"{equipo}_{datetime.now().strftime('%H%M%S')}.{file_extension}"
 
-        
-
         try:
 
             # Subir bytes directamente al bucket 'evidencias'
@@ -145,8 +134,6 @@ def save_record(equipo, usuario, fecha_reporte, file):
         except Exception as e:
 
             st.error(f"Error al subir evidencia: {e}")
-
-
 
     # Insertar datos en la tabla
 
@@ -176,8 +163,6 @@ def save_record(equipo, usuario, fecha_reporte, file):
 
         st.error(f"Error al insertar registro: {e}")
 
-
-
 def update_record(id_reg, f_atencion, comentario):
 
     """Actualiza la atención y comentarios de un registro."""
@@ -197,9 +182,6 @@ def update_record(id_reg, f_atencion, comentario):
     except Exception as e:
 
         st.error(f"Error al actualizar: {e}")
-
-
-
 def delete_record(id_reg):
 
     """Elimina un registro de la tabla."""
@@ -213,8 +195,6 @@ def delete_record(id_reg):
     except Exception as e:
 
         st.error(f"Error al eliminar: {e}")
-
-
 
 # --- EXPORTACIÓN A EXCEL ---
 
@@ -232,8 +212,6 @@ def exportar_excel_pro(df):
 
     return output.getvalue()
 
-
-
 # --- SIDEBAR ---
 
 with st.sidebar:
@@ -250,21 +228,15 @@ with st.sidebar:
 
     )
 
-
-
 # --- TÍTULO PRINCIPAL ---
 
 st.markdown('<div class="main-title">🛡️ CONTROLES DE SEGURIDAD DIGITAL</div>', unsafe_allow_html=True)
-
-
 
 # --- LÓGICA DE CONTENIDO ---
 
 if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 
     col_izq, col_der = st.columns([1, 2.2])
-
-
 
     # --- COLUMNA IZQUIERDA: REGISTRO Y DASHBOARD ---
 
@@ -302,8 +274,6 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 
         df_dash = get_all_data()
 
-        
-
         if not df_dash.empty:
 
             total = len(df_dash)
@@ -323,8 +293,6 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
             d2.metric("Atendidos", atendidos)
 
             d3.metric("Pendientes", pendientes)
-
-
 
             st.bar_chart(pd.DataFrame({
 
@@ -485,8 +453,6 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 elif opcion == "GESTIÓN DE ...":
 
     st.subheader("Módulo en desarrollo...")
-
-
 
 elif opcion == "GESTION DE...":
 
