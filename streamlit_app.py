@@ -40,7 +40,7 @@ body { background-color: #F4F6F9; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE BASE DE DATOS ---
+# --- FUNCIONES ---
 def get_all_data():
     try:
         response = supabase.table("gestiones").select("*").order("id", desc=True).execute()
@@ -74,27 +74,12 @@ def save_record(equipo, usuario, fecha_reporte, file):
         "comentarios": ""
     }
 
-    try:
-        supabase.table("gestiones").insert(data).execute()
-        st.success("Registro guardado exitosamente ✅")
-    except Exception as e:
-        st.error(f"Error al insertar registro: {e}")
+    supabase.table("gestiones").insert(data).execute()
+    st.success("Registro guardado exitosamente ✅")
 
 def delete_record(id_reg):
-    try:
-        supabase.table("gestiones").delete().eq("id", id_reg).execute()
-        st.toast("Registro eliminado")
-    except Exception as e:
-        st.error(f"Error al eliminar: {e}")
-
-# --- EXPORTACIÓN ---
-def exportar_excel_pro(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte')
-        worksheet = writer.sheets['Reporte']
-        worksheet.set_column('A:G', 20)
-    return output.getvalue()
+    supabase.table("gestiones").delete().eq("id", id_reg).execute()
+    st.toast("Registro eliminado")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -119,32 +104,12 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
             eq = st.text_input("Equipo")
             us = st.text_input("Usuario")
             f_r = st.date_input("Fecha Reporte", datetime.now())
-            evid = st.file_uploader("Evidencia (Captura)", type=['png', 'jpg', 'jpeg'])
+            evid = st.file_uploader("Evidencia (Captura)", type=['png','jpg','jpeg'])
 
             if st.form_submit_button("💾 Guardar"):
                 if eq and us:
                     save_record(eq, us, f_r.strftime("%Y-%m-%d"), evid)
                     st.rerun()
-                else:
-                    st.warning("Complete Equipo y Usuario")
-
-        st.markdown("### 📊 Dashboard")
-        df_dash = get_all_data()
-
-        if not df_dash.empty:
-            total = len(df_dash)
-            atendidos = df_dash[df_dash["fecha_atencion"].fillna("") != ""].shape[0]
-            pendientes = total - atendidos
-
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Total", total)
-            d2.metric("Atendidos", atendidos)
-            d3.metric("Pendientes", pendientes)
-
-            st.bar_chart(pd.DataFrame({
-                "Estado": ["Atendidos", "Pendientes"],
-                "Cantidad": [atendidos, pendientes]
-            }).set_index("Estado"))
 
     # DERECHA
     with col_der:
@@ -160,6 +125,7 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 
                     c1, c2, c3, c4 = st.columns([1.5, 2, 1, 1.2])
 
+                    # IMAGEN PRINCIPAL
                     with c1:
                         if row['captura_path']:
                             st.image(row['captura_path'], use_container_width=True)
@@ -168,20 +134,30 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
 
                         nueva_evid = st.file_uploader("Actualizar Imagen", type=['png','jpg','jpeg'], key=f"upd_{row['id']}")
 
+                    # COMENTARIOS
                     with c2:
                         st.text_input("Fecha Reporte", value=row['fecha_reporte'], disabled=True, key=f"fr_{row['id']}")
                         f_at = st.text_input("Fecha Atención", value=f_at_val, key=f"f_{row['id']}")
 
-                        com = st.text_area("Comentarios", value=row['comentarios'] or "", key=f"c_{row['id']}")
+                        com = st.text_area(
+                            "Comentarios",
+                            value=row['comentarios'] if row['comentarios'] else "",
+                            key=f"c_{row['id']}",
+                            height=150
+                        )
 
-                        # subir imagen en comentario
-                        img_com = st.file_uploader("Adjuntar imagen en comentario", type=['png','jpg','jpeg'], key=f"img_{row['id']}")
+                        img_com = st.file_uploader(
+                            "Adjuntar imagen en comentario",
+                            type=['png','jpg','jpeg'],
+                            key=f"img_com_{row['id']}"
+                        )
 
                         # PREVISUALIZACIÓN
-                        if row['comentarios'] and "http" in row['comentarios']:
+                        if row['comentarios'] and "Imagen:" in row['comentarios']:
                             try:
                                 url = row['comentarios'].split("Imagen: ")[-1].strip()
-                                st.image(url, caption="Imagen del comentario", use_container_width=True)
+                                st.markdown("**Vista previa del comentario:**")
+                                st.image(url, use_container_width=True)
                             except:
                                 pass
 
@@ -198,11 +174,18 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                             comentario_final = com
 
                             if img_com:
-                                file_name = f"coment_{row['id']}_{datetime.now().strftime('%H%M%S')}.jpg"
+                                file_extension = img_com.name.split('.')[-1]
+                                file_name = f"coment_{row['id']}_{datetime.now().strftime('%H%M%S')}.{file_extension}"
                                 file_bytes = img_com.getvalue()
-                                supabase.storage.from_("evidencias").upload(file_name, file_bytes)
-                                url = supabase.storage.from_("evidencias").get_public_url(file_name)
-                                comentario_final = f"{com}\n\n📎 Imagen: {url}"
+
+                                supabase.storage.from_("evidencias").upload(
+                                    path=file_name,
+                                    file=file_bytes,
+                                    file_options={"content-type": img_com.type}
+                                )
+
+                                url_img = supabase.storage.from_("evidencias").get_public_url(file_name)
+                                comentario_final = f"{com}\n\nImagen: {url_img}"
 
                             supabase.table("gestiones").update({
                                 "fecha_atencion": f_at,
@@ -213,16 +196,33 @@ if opcion == "GESTIÓN DE VULNERABILIDADES TÉCNICAS":
                             st.success("Actualizado")
                             st.rerun()
 
+                    # ELIMINAR
                     with c3:
                         if st.button("Eliminar", key=f"del_{row['id']}"):
                             delete_record(row['id'])
                             st.rerun()
 
+                    # CORREO (VERDE ORIGINAL)
                     with c4:
                         asunto = f"Actualizar sistema operativo - {row['equipo']}"
                         cuerpo = f"Solicito actualizar equipo {row['equipo']}"
-                        url = f"mailto:yaliaga@mincetur.gob.pe?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
-                        st.markdown(f'<a href="{url}"><button style="width:100%">📧 Enviar Correo</button></a>', unsafe_allow_html=True)
+                        mail_url = f"mailto:yaliaga@mincetur.gob.pe?subject={urllib.parse.quote(asunto)}&body={urllib.parse.quote(cuerpo)}"
+
+                        st.markdown(f'''
+                        <a href="{mail_url}" target="_blank">
+                            <button style="
+                                width:100%;
+                                padding:8px;
+                                border-radius:8px;
+                                border:none;
+                                background:linear-gradient(90deg, #28a745, #218838);
+                                color:white;
+                                font-weight:600;
+                                cursor:pointer;">
+                                📧 Enviar Correo
+                            </button>
+                        </a>
+                        ''', unsafe_allow_html=True)
 
 elif opcion == "GESTIÓN DE ...":
     st.subheader("Módulo en desarrollo...")
